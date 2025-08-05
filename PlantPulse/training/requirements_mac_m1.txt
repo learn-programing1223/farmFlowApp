@@ -1,0 +1,20 @@
+# Requirements for Apple Silicon Macs (M1/M2)
+
+# TensorFlow for Apple Silicon
+tensorflow-macos
+tensorflow-metal
+
+# Core dependencies
+numpy<2.0
+opencv-python
+matplotlib
+tqdm
+pandas
+h5py
+Pillow
+scikit-image
+seaborn
+
+# For model optimization
+# Note: Some features may not be available on M1
+# tensorflow-model-optimization

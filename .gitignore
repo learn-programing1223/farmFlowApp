@@ -1,0 +1,121 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Data files - EXCLUDE ALL DATA
+data/
+*.npy
+*.npz
+*.csv
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!*.config.json
+!rgb_model/improved_config.json
+
+# Dataset directories
+rgb_model/data/
+PlantVillage/
+PlantDoc/
+PlantNet/
+augmented/
+splits/
+cache/
+
+# Model files
+models/
+*.keras
+*.tflite
+*.pb
+*.pth
+*.pt
+*.weights
+*.ckpt*
+checkpoint*
+saved_model/
+
+# Logs and temporary files
+*.log
+logs/
+tensorboard/
+.ipynb_checkpoints/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Test outputs
+test_results/
+outputs/
+results/
+
+# Large files
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+
+# Image datasets (but keep sample images for docs)
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.tiff
+*.tif
+!docs/**/*.png
+!docs/**/*.jpg
+!README_images/*.png
+
+# Training artifacts
+training_report.json
+evaluation_results.json
+training_curves.png
+confusion_matrix.png
+
+# Node modules (for React Native)
+node_modules/
+.expo/
+dist/
+npm-debug.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+web-build/
+
+# React Native
+.expo-shared/
+*.xcworkspace
+*.xcuserstate
+ios/Pods/
+android/.gradle/
+android/app/build/
+android/build/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local

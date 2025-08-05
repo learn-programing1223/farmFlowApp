@@ -1,0 +1,41 @@
+# Core dependencies for RGB Plant Disease Detection Model
+
+# TensorFlow and related
+tensorflow>=2.13.0
+# tensorflow-lite>=2.13.0  # Included with tensorflow
+# tensorflow-addons>=0.21.0  # Optional, may not be compatible with latest TF
+
+# Image processing
+opencv-python>=4.8.0
+Pillow>=10.1.0
+albumentations>=1.3.1
+
+# Data handling
+numpy>=1.24.0
+pandas>=2.1.0
+scikit-learn>=1.3.0
+
+# Visualization and monitoring
+matplotlib>=3.7.0
+seaborn>=0.13.0
+tensorboard>=2.15.0
+wandb>=0.16.0  # Optional: for experiment tracking
+
+# Progress bars and utilities
+tqdm>=4.66.0
+requests>=2.31.0
+
+# Development tools
+pytest>=7.4.0
+black>=23.0.0
+flake8>=6.1.0
+mypy>=1.7.0
+
+# Deployment
+tflite-runtime>=2.14.0  # For edge deployment (Raspberry Pi)
+flask>=3.0.0  # For inference server
+gunicorn>=21.2.0  # Production server
+
+# Optional dependencies
+# jupyter>=1.0.0  # For notebooks
+# ipykernel>=6.26.0  # For Jupyter kernel

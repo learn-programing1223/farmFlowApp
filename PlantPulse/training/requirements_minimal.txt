@@ -1,0 +1,11 @@
+# Minimal requirements for PlantPulse training
+
+# Core
+tensorflow==2.15.0
+numpy==1.26.4
+opencv-python
+matplotlib
+tqdm
+pandas
+h5py
+Pillow
