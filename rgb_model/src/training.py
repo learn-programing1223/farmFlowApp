@@ -57,7 +57,8 @@ class ProgressiveTrainer:
     def create_data_generator(self, x_data: np.ndarray, y_data: np.ndarray,
                             batch_size: int, is_training: bool = True):
         """
-        Creates a data generator with optional augmentation.
+        Creates a data generator with advanced augmentation.
+        Applies MixUp and CutMix during training for better generalization.
         """
         def data_generator():
             indices = np.arange(len(x_data))
@@ -68,13 +69,30 @@ class ProgressiveTrainer:
                 
                 for start_idx in range(0, len(indices), batch_size):
                     batch_indices = indices[start_idx:start_idx + batch_size]
-                    batch_x = x_data[batch_indices]
-                    batch_y = y_data[batch_indices]
+                    batch_x = x_data[batch_indices].copy()  # Copy to avoid modifying original
+                    batch_y = y_data[batch_indices].copy()
                     
-                    if is_training and self.training_config.get('use_mixup', True):
-                        # Apply MixUp augmentation randomly
-                        if np.random.random() < 0.5:
+                    if is_training:
+                        # Apply augmentation with probability
+                        augmentation_prob = np.random.random()
+                        
+                        if augmentation_prob < 0.25 and self.training_config.get('use_mixup', True):
+                            # Apply MixUp (25% chance)
                             batch_x, batch_y = self.mixup.mixup_batch(batch_x, batch_y)
+                            
+                        elif augmentation_prob < 0.5 and self.training_config.get('use_cutmix', True):
+                            # Apply CutMix (25% chance)
+                            # Shuffle for pairing
+                            shuffle_indices = np.random.permutation(len(batch_x))
+                            
+                            for i in range(0, len(batch_x), 2):
+                                if i + 1 < len(batch_x):
+                                    batch_x[i], batch_y[i] = self.cutmix.cutmix(
+                                        batch_x[i], batch_y[i],
+                                        batch_x[shuffle_indices[i]], batch_y[shuffle_indices[i]]
+                                    )
+                        
+                        # 50% chance of no augmentation (original images)
                     
                     yield batch_x, batch_y
         

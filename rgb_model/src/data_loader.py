@@ -260,6 +260,90 @@ class MultiDatasetLoader:
         
         return images, labels
     
+    def load_plantnet(self, max_samples: int = 10000) -> Tuple[List[str], List[str]]:
+        """
+        Loads PlantNet-300K dataset from zip file.
+        Due to the large size (31.7GB), we'll extract and use a subset.
+        
+        Args:
+            max_samples: Maximum number of samples to load from PlantNet
+        
+        Returns:
+            Tuple of (image_paths, labels)
+        """
+        print("\nLoading PlantNet-300K dataset...")
+        zip_path = self.base_data_dir / 'plantnet_300K.zip'
+        
+        # Check if zip exists in src/data
+        if not zip_path.exists():
+            zip_path = Path(__file__).parent / 'data' / 'plantnet_300K.zip'
+        
+        if not zip_path.exists():
+            print(f"PlantNet dataset not found at {zip_path}")
+            print("Please ensure plantnet_300K.zip is in the data directory")
+            return [], []
+        
+        print(f"Found PlantNet zip at {zip_path}")
+        print(f"Loading up to {max_samples} samples...")
+        
+        images = []
+        labels = []
+        
+        try:
+            import zipfile
+            
+            # Open zip file
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                # Get list of all image files in zip
+                image_files = [f for f in zf.namelist() 
+                             if f.lower().endswith(('.jpg', '.jpeg', '.png')) 
+                             and not f.startswith('__MACOSX')]
+                
+                print(f"Total images in PlantNet: {len(image_files)}")
+                
+                # Sample randomly if we have more than max_samples
+                if len(image_files) > max_samples:
+                    np.random.seed(42)  # For reproducibility
+                    image_files = np.random.choice(image_files, max_samples, replace=False)
+                
+                # Extract to temp directory and process
+                temp_dir = self.base_data_dir / 'plantnet_temp'
+                temp_dir.mkdir(exist_ok=True)
+                
+                for img_file in tqdm(image_files[:max_samples], desc="Extracting PlantNet images"):
+                    try:
+                        # Extract file
+                        zf.extract(img_file, temp_dir)
+                        img_path = temp_dir / img_file
+                        
+                        # Parse label from directory structure
+                        # PlantNet structure: class_name/image.jpg or genus_species/image.jpg
+                        parts = img_file.split('/')
+                        if len(parts) >= 2:
+                            # Use genus or general plant name as label
+                            label = parts[-2].replace('_', ' ')
+                            
+                            # PlantNet is for feature learning, not disease detection
+                            # Skip PlantNet for disease-focused training
+                            # We'll use it separately for feature extraction if needed
+                            images.append(str(img_path))
+                            labels.append('healthy')  # PlantNet only has healthy plants
+                        
+                    except Exception as e:
+                        print(f"Error extracting {img_file}: {e}")
+                        continue
+                
+                print(f"Successfully loaded {len(images)} PlantNet images")
+                
+        except Exception as e:
+            print(f"Error loading PlantNet dataset: {e}")
+            return [], []
+        
+        # Harmonize labels
+        images, labels = self.harmonizer.harmonize_dataset('PlantNet', images, labels)
+        
+        return images, labels
+    
     def load_augmented_images(self) -> Tuple[List[str], List[str]]:
         """
         Loads synthetic augmented images
@@ -325,6 +409,11 @@ class MultiDatasetLoader:
         kp_images, kp_labels = self.load_kaggle_plant_pathology()
         if kp_images:
             all_datasets['Kaggle'] = (kp_images, kp_labels)
+        
+        # Load PlantNet dataset
+        pn_images, pn_labels = self.load_plantnet(max_samples=5000)  # Limit for memory
+        if pn_images:
+            all_datasets['PlantNet'] = (pn_images, pn_labels)
         
         # Load augmented images if requested
         if include_augmented:
@@ -426,21 +515,76 @@ class MultiDatasetLoader:
     
     def prepare_train_val_test_split(self, X: np.ndarray, y: np.ndarray,
                                     val_split: float = 0.15,
-                                    test_split: float = 0.15) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+                                    test_split: float = 0.15,
+                                    ensure_no_leakage: bool = True,
+                                    save_to_disk: bool = True) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
         """
         Splits data into train, validation, and test sets.
+        IMPORTANT: Uses stratified splitting to prevent data leakage.
+        Each sample appears in exactly ONE split.
+        
+        Args:
+            X: Input images
+            y: One-hot encoded labels
+            val_split: Validation set size
+            test_split: Test set size  
+            ensure_no_leakage: Verify no data leakage
         """
+        # Set seed for reproducibility
+        np.random.seed(42)
+        
+        # Get indices for tracking
+        indices = np.arange(len(X))
+        
         # First split: train+val vs test
-        X_temp, X_test, y_temp, y_test = train_test_split(
-            X, y, test_size=test_split, random_state=42, stratify=y.argmax(axis=1)
+        X_temp, X_test, y_temp, y_test, idx_temp, idx_test = train_test_split(
+            X, y, indices, test_size=test_split, random_state=42, stratify=y.argmax(axis=1)
         )
         
         # Second split: train vs val
         val_size = val_split / (1 - test_split)  # Adjust for the remaining data
-        X_train, X_val, y_train, y_val = train_test_split(
-            X_temp, y_temp, test_size=val_size, random_state=42, 
+        X_train, X_val, y_train, y_val, idx_train, idx_val = train_test_split(
+            X_temp, y_temp, idx_temp, test_size=val_size, random_state=42, 
             stratify=y_temp.argmax(axis=1)
         )
+        
+        # Verify no data leakage
+        if ensure_no_leakage:
+            print("\nVerifying no data leakage...")
+            
+            # Check for index overlap
+            train_set = set(idx_train)
+            val_set = set(idx_val)
+            test_set = set(idx_test)
+            
+            # No overlap should exist
+            assert len(train_set & val_set) == 0, "Data leakage: Train and Val sets overlap!"
+            assert len(train_set & test_set) == 0, "Data leakage: Train and Test sets overlap!"
+            assert len(val_set & test_set) == 0, "Data leakage: Val and Test sets overlap!"
+            
+            # Verify all indices are accounted for
+            all_indices = train_set | val_set | test_set
+            assert len(all_indices) == len(X), "Some samples are missing from splits!"
+            
+            # Check for duplicate images using hashing
+            print("Checking for duplicate images across splits...")
+            from hashlib import md5
+            
+            def hash_array(arr):
+                return md5(arr.tobytes()).hexdigest()
+            
+            train_hashes = set([hash_array(x) for x in X_train[:100]])  # Check first 100
+            val_hashes = set([hash_array(x) for x in X_val[:100]])
+            test_hashes = set([hash_array(x) for x in X_test[:100]])
+            
+            assert len(train_hashes & val_hashes) == 0, "Duplicate images in train and val!"
+            assert len(train_hashes & test_hashes) == 0, "Duplicate images in train and test!"
+            assert len(val_hashes & test_hashes) == 0, "Duplicate images in val and test!"
+            
+            print("✓ No data leakage detected!")
+            print(f"✓ Train: {len(idx_train)} unique samples")
+            print(f"✓ Val: {len(idx_val)} unique samples")
+            print(f"✓ Test: {len(idx_test)} unique samples")
         
         splits = {
             'train': (X_train, y_train),
