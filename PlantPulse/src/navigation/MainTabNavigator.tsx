@@ -2,7 +2,7 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { MainTabParamList } from '../types';
-import CameraScreen from '../ui/screens/CameraScreen';
+import UnifiedCameraScreen from '../ui/screens/UnifiedCameraScreen';
 import PlantsScreen from '../ui/screens/PlantsScreen';
 import HistoryScreen from '../ui/screens/HistoryScreen';
 import ProfileScreen from '../ui/screens/ProfileScreen';
@@ -47,7 +47,7 @@ const MainTabNavigator: React.FC = () => {
       })}>
       <Tab.Screen
         name="Camera"
-        component={CameraScreen}
+        component={UnifiedCameraScreen}
         options={{ title: 'Scan' }}
       />
       <Tab.Screen
