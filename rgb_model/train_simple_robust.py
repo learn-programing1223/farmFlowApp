@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Robust training script for PlantVillage dataset
-Using simpler architecture to avoid shape mismatches
+Simplified robust training script for PlantVillage dataset
+Fixed version without shape mismatches
 """
 
 import tensorflow as tf
@@ -13,13 +13,13 @@ import json
 from datetime import datetime
 
 print("=" * 70)
-print("ROBUST PLANTVILLAGE MODEL TRAINING - SIMPLIFIED")
+print("ROBUST PLANTVILLAGE MODEL TRAINING")
 print("=" * 70)
 
 # Configuration
 config = {
     'input_shape': (224, 224, 3),
-    'num_classes': 6,  # 6 categories (no Rust)
+    'num_classes': 6,  # 6 categories (no Rust in PlantVillage)
     'batch_size': 32,
     'epochs': 30,
     'learning_rate': 0.001,
@@ -54,7 +54,7 @@ if not train_path.exists():
     print("Please run prepare_plantvillage_data.py first")
     exit(1)
 
-# Calculate class weights
+# Calculate class weights for imbalanced data
 print("\n" + "-" * 70)
 print("Calculating class weights...")
 
@@ -62,16 +62,17 @@ class_counts = {}
 for class_dir in train_path.iterdir():
     if class_dir.is_dir():
         count = len(list(class_dir.glob('*.jpg')))
-        if count > 0:  # Only include non-empty classes
-            class_counts[class_dir.name] = count
-            print(f"  {class_dir.name}: {count} images")
+        class_counts[class_dir.name] = count
+        print(f"  {class_dir.name}: {count} images")
 
 # Calculate weights (inverse of frequency)
-total_samples = sum(class_counts.values())
-num_classes = len(class_counts)
+# Filter out classes with zero samples
+non_zero_classes = {k: v for k, v in class_counts.items() if v > 0}
+total_samples = sum(non_zero_classes.values())
+num_classes = len(non_zero_classes)
 class_weights = {}
 
-for idx, (class_name, count) in enumerate(sorted(class_counts.items())):
+for idx, (class_name, count) in enumerate(sorted(non_zero_classes.items())):
     weight = total_samples / (num_classes * count)
     class_weights[idx] = weight
     print(f"  Weight for {class_name}: {weight:.3f}")
@@ -129,69 +130,52 @@ print(f"[OK] Validation samples: {val_generator.samples}")
 print(f"[OK] Test samples: {test_generator.samples}")
 print(f"[OK] Classes: {list(train_generator.class_indices.keys())}")
 
-# Build simpler CNN model
+# Build model with transfer learning
 print("\n" + "-" * 70)
-print("Building robust CNN model...")
+print("Building EfficientNetB0 model...")
 
 def create_model():
-    """Create a robust CNN model from scratch"""
+    """Create EfficientNetB0 model with proper input shape"""
     
-    model = keras.Sequential([
-        # Input layer
-        layers.InputLayer(input_shape=config['input_shape']),
-        
-        # Block 1
-        layers.Conv2D(32, (3, 3), activation='relu', padding='same'),
-        layers.BatchNormalization(),
-        layers.Conv2D(32, (3, 3), activation='relu', padding='same'),
-        layers.BatchNormalization(),
-        layers.MaxPooling2D((2, 2)),
-        layers.Dropout(0.25),
-        
-        # Block 2
-        layers.Conv2D(64, (3, 3), activation='relu', padding='same'),
-        layers.BatchNormalization(),
-        layers.Conv2D(64, (3, 3), activation='relu', padding='same'),
-        layers.BatchNormalization(),
-        layers.MaxPooling2D((2, 2)),
-        layers.Dropout(0.25),
-        
-        # Block 3
-        layers.Conv2D(128, (3, 3), activation='relu', padding='same'),
-        layers.BatchNormalization(),
-        layers.Conv2D(128, (3, 3), activation='relu', padding='same'),
-        layers.BatchNormalization(),
-        layers.MaxPooling2D((2, 2)),
-        layers.Dropout(0.25),
-        
-        # Block 4
-        layers.Conv2D(256, (3, 3), activation='relu', padding='same'),
-        layers.BatchNormalization(),
-        layers.Conv2D(256, (3, 3), activation='relu', padding='same'),
-        layers.BatchNormalization(),
-        layers.GlobalAveragePooling2D(),
-        
-        # Dense layers
-        layers.Dense(512, activation='relu'),
-        layers.BatchNormalization(),
-        layers.Dropout(0.5),
-        layers.Dense(256, activation='relu'),
-        layers.BatchNormalization(),
-        layers.Dropout(0.3),
-        
-        # Output layer
-        layers.Dense(config['num_classes'], activation='softmax')
-    ])
+    # Base model - EfficientNetB0 for mobile deployment
+    base_model = tf.keras.applications.EfficientNetB0(
+        input_shape=config['input_shape'],
+        include_top=False,
+        weights='imagenet'
+    )
     
-    return model
+    # Freeze base model layers initially
+    base_model.trainable = False
+    
+    # Build model
+    inputs = keras.Input(shape=config['input_shape'])
+    
+    # Preprocessing for EfficientNet (normalize to [-1, 1])
+    x = tf.keras.applications.efficientnet.preprocess_input(inputs)
+    
+    # Base model
+    x = base_model(x, training=False)
+    
+    # Custom head
+    x = layers.GlobalAveragePooling2D()(x)
+    x = layers.Dense(256, activation='relu')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Dropout(0.5)(x)
+    x = layers.Dense(128, activation='relu')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Dropout(0.3)(x)
+    
+    # Output layer
+    outputs = layers.Dense(config['num_classes'], activation='softmax')(x)
+    
+    model = keras.Model(inputs, outputs)
+    
+    return model, base_model
 
 # Create model
-model = create_model()
+model, base_model = create_model()
 print(f"[OK] Model created with {model.count_params():,} parameters")
-
-# Print model summary
-print("\nModel Summary:")
-model.summary()
+print(f"  Trainable: {sum(1 for w in model.trainable_weights):,} parameters")
 
 # Compile model
 print("\n" + "-" * 70)
@@ -216,7 +200,7 @@ model.compile(
 callbacks = [
     # Save best model
     keras.callbacks.ModelCheckpoint(
-        'models/plantvillage_robust_best.h5',
+        'models/plantvillage_best.h5',
         monitor='val_accuracy',
         save_best_only=True,
         mode='max',
@@ -242,19 +226,54 @@ callbacks = [
     
     # Tensorboard logs
     keras.callbacks.TensorBoard(
-        log_dir=f'logs/plantvillage_robust_{datetime.now().strftime("%Y%m%d-%H%M%S")}',
+        log_dir=f'logs/plantvillage_{datetime.now().strftime("%Y%m%d-%H%M%S")}',
         histogram_freq=1
     )
 ]
 
-# Training
+# Training Phase 1: Train with frozen base
 print("\n" + "=" * 70)
-print("STARTING TRAINING...")
+print("PHASE 1: Training with frozen base model...")
 print("=" * 70)
 
-history = model.fit(
+history_frozen = model.fit(
     train_generator,
-    epochs=config['epochs'],
+    epochs=10,  # First 10 epochs with frozen base
+    validation_data=val_generator,
+    class_weight=class_weights,
+    callbacks=callbacks,
+    verbose=1
+)
+
+# Phase 2: Fine-tuning
+print("\n" + "=" * 70)
+print("PHASE 2: Fine-tuning the model...")
+print("=" * 70)
+
+# Unfreeze the top layers of base model
+base_model.trainable = True
+
+# Fine-tune from this layer onwards
+fine_tune_at = len(base_model.layers) - 20
+
+# Freeze all layers before fine_tune_at
+for layer in base_model.layers[:fine_tune_at]:
+    layer.trainable = False
+
+print(f"[OK] Unfreezing top {len(base_model.layers) - fine_tune_at} layers for fine-tuning")
+
+# Recompile with lower learning rate
+model.compile(
+    optimizer=keras.optimizers.Adam(learning_rate=1e-5),
+    loss='categorical_crossentropy',
+    metrics=['accuracy', 'precision', 'recall']
+)
+
+# Continue training
+history_fine = model.fit(
+    train_generator,
+    epochs=config['epochs'] - 10,  # Remaining epochs
+    initial_epoch=10,
     validation_data=val_generator,
     class_weight=class_weights,
     callbacks=callbacks,
@@ -278,8 +297,8 @@ print("\n" + "-" * 70)
 print("Saving models...")
 
 # Save Keras model
-model.save('models/plantvillage_robust_final.h5')
-print("[OK] Saved Keras model: models/plantvillage_robust_final.h5")
+model.save('models/plantvillage_final.h5')
+print("[OK] Saved Keras model: models/plantvillage_final.h5")
 
 # Convert to TFLite
 converter = tf.lite.TFLiteConverter.from_keras_model(model)
@@ -289,7 +308,7 @@ converter.target_spec.supported_types = [tf.float16]
 tflite_model = converter.convert()
 
 # Save TFLite model
-tflite_path = 'models/plantvillage_robust.tflite'
+tflite_path = 'models/plantvillage_model.tflite'
 with open(tflite_path, 'wb') as f:
     f.write(tflite_model)
 
@@ -305,13 +324,16 @@ history_data = {
         'precision': float(test_results[2]),
         'recall': float(test_results[3])
     },
-    'training_history': history.history
+    'training_history': {
+        'frozen_phase': history_frozen.history,
+        'fine_tuning_phase': history_fine.history if 'history_fine' in locals() else {}
+    }
 }
 
-with open('models/plantvillage_robust_history.json', 'w') as f:
+with open('models/plantvillage_history.json', 'w') as f:
     json.dump(history_data, f, indent=2, default=str)
 
-print("[OK] Saved training history: models/plantvillage_robust_history.json")
+print("[OK] Saved training history: models/plantvillage_history.json")
 
 # Final summary
 print("\n" + "=" * 70)
@@ -326,11 +348,11 @@ else:
     print("Consider: More epochs, different augmentation, or additional data")
 
 print("\n>>> Model files created:")
-print("  - models/plantvillage_robust_best.h5 (best checkpoint)")
-print("  - models/plantvillage_robust_final.h5 (final model)")
-print(f"  - models/plantvillage_robust.tflite ({len(tflite_model)/1024/1024:.2f} MB)")
+print("  - models/plantvillage_best.h5 (best checkpoint)")
+print("  - models/plantvillage_final.h5 (final model)")
+print(f"  - models/plantvillage_model.tflite ({len(tflite_model)/1024/1024:.2f} MB)")
 
 print("\n>>> Next steps:")
 print("  1. Test on real-world images: python comprehensive_real_world_test.py")
-print("  2. Deploy to app: Copy .tflite file to PlantPulse/assets/models/")
+print("  2. Deploy to app: python convert_and_deploy.py")
 print("  3. Verify deployment: python verify_deployed_model.py")

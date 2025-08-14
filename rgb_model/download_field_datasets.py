@@ -63,11 +63,12 @@ def download_plant_pathology():
             "-c", "plant-pathology-2021-fgvc8",
             "-p", str(kaggle_dir)
         ], check=False)
-    except ImportError:
-        print("\nTo download from Kaggle:")
-        print("1. pip install kaggle")
-        print("2. Get API key from kaggle.com/account")
-        print("3. Run: kaggle competitions download -c plant-pathology-2021-fgvc8")
+    except (ImportError, OSError) as e:
+        print(f"\nKaggle download skipped: {str(e)[:100]}")
+        print("\nWe'll proceed without Kaggle data for now.")
+        print("To enable Kaggle downloads later:")
+        print("1. Get API key from kaggle.com/account")
+        print("2. Save to ~/.kaggle/kaggle.json")
     
     return kaggle_dir
 

@@ -1,0 +1,36 @@
+# CycleGAN Augmentation System Requirements
+# For comprehensive plant disease detection with field-style augmentation
+
+# Core ML/AI libraries
+tensorflow>=2.12.0,<2.16.0
+tensorflow-lite>=2.12.0
+numpy>=1.21.0,<1.25.0
+scikit-learn>=1.0.0
+
+# Image processing
+opencv-python>=4.7.0
+Pillow>=9.0.0
+imageio>=2.15.0
+
+# Data visualization
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# Progress bars and CLI
+tqdm>=4.62.0
+click>=8.0.0
+
+# Utility libraries
+pathlib2>=2.3.0  # For older Python compatibility
+concurrent.futures>=3.1.0  # Usually built-in but listed for clarity
+
+# Development and debugging
+ipython>=8.0.0  # For interactive debugging
+jupyter>=1.0.0  # For notebook analysis
+
+# Optional but recommended
+tensorboard>=2.12.0  # For training visualization
+pytest>=6.0.0  # For testing
+
+# System utilities
+psutil>=5.8.0  # For system monitoring

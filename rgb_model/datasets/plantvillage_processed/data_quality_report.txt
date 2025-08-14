@@ -1,0 +1,56 @@
+PlantVillage Dataset Quality Analysis Report
+==================================================
+
+Generated: 2025-08-11T01:59:30.911446
+Total images processed: 8452
+
+Dataset Structure:
+--------------------
+
+TRAIN:
+  Blight            : 1050 images
+  Healthy           : 1050 images
+  Leaf_Spot         : 1050 images
+  Mosaic_Virus      : 1050 images
+  Nutrient_Deficiency:  666 images
+  Powdery_Mildew    : 1050 images
+  Rust              :    0 images
+  TOTAL             : 5916 images
+
+VAL:
+  Blight            :  225 images
+  Healthy           :  225 images
+  Leaf_Spot         :  225 images
+  Mosaic_Virus      :  225 images
+  Nutrient_Deficiency:  143 images
+  Powdery_Mildew    :  225 images
+  Rust              :    0 images
+  TOTAL             : 1268 images
+
+TEST:
+  Blight            :  225 images
+  Healthy           :  225 images
+  Leaf_Spot         :  225 images
+  Mosaic_Virus      :  225 images
+  Nutrient_Deficiency:  143 images
+  Powdery_Mildew    :  225 images
+  Rust              :    0 images
+  TOTAL             : 1268 images
+
+Overall Distribution:
+--------------------
+  Blight            : 1500 images
+  Healthy           : 1500 images
+  Leaf_Spot         : 1500 images
+  Mosaic_Virus      : 1500 images
+  Nutrient_Deficiency:  952 images
+  Powdery_Mildew    : 1500 images
+  Rust              :    0 images
+  GRAND TOTAL       : 8452 images
+
+Class Balance Metrics:
+--------------------
+  Mean images per class: 1207.4
+  Standard deviation: 527.9
+  Balance ratio (min/max): 0.000
+  Status: Significantly imbalanced [ERROR]

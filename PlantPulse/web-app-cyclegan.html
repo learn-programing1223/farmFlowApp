@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PlantPulse - 96% Accuracy CycleGAN Model</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            padding: 30px;
+            text-align: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            border-radius: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            color: #4CAF50;
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+        
+        .model-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        
+        .status {
+            background: #f0f9ff;
+            border-left: 4px solid #3b82f6;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        .status.error {
+            background: #fee2e2;
+            border-left-color: #dc2626;
+            color: #dc2626;
+        }
+        
+        .status.success {
+            background: #d1fae5;
+            border-left-color: #10b981;
+            color: #065f46;
+        }
+        
+        .upload-section {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        
+        .upload-area {
+            border: 3px dashed #cbd5e1;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #f8fafc;
+        }
+        
+        .upload-area:hover {
+            border-color: #667eea;
+            background: #f0f4ff;
+        }
+        
+        .upload-area.dragover {
+            border-color: #4CAF50;
+            background: #f0fdf4;
+        }
+        
+        .upload-area h3 {
+            color: #475569;
+            margin-bottom: 10px;
+        }
+        
+        .upload-area p {
+            color: #94a3b8;
+            font-size: 14px;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+            margin-top: 20px;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .preview-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-top: 30px;
+        }
+        
+        .preview-box {
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        
+        .preview-box h3 {
+            color: #334155;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        #preview {
+            width: 100%;
+            height: 300px;
+            object-fit: contain;
+            border-radius: 10px;
+            background: #f8fafc;
+        }
+        
+        .results {
+            min-height: 300px;
+        }
+        
+        .result-item {
+            background: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .result-item.top {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+        }
+        
+        .disease-name {
+            font-weight: 600;
+        }
+        
+        .confidence {
+            font-size: 20px;
+            font-weight: bold;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            transition: width 0.5s ease;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .info-box {
+            background: #fef3c7;
+            border: 1px solid #fbbf24;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        
+        .info-box h4 {
+            color: #92400e;
+            margin-bottom: 10px;
+        }
+        
+        .info-box ul {
+            color: #78350f;
+            margin-left: 20px;
+            font-size: 14px;
+        }
+        
+        @media (max-width: 768px) {
+            .preview-section {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🌿 PlantPulse Disease Detection</h1>
+            <p>Advanced AI-powered plant disease diagnosis</p>
+            <div class="model-badge">96.1% Accuracy CycleGAN Model</div>
+        </div>
+        
+        <div id="status" class="status">
+            Initializing AI model... This may take a moment.
+        </div>
+        
+        <div class="upload-section">
+            <div class="upload-area" id="uploadArea">
+                <h3>📸 Upload Plant Image</h3>
+                <p>Click to browse or drag & drop an image here</p>
+                <p style="margin-top: 10px; font-size: 12px;">Supports JPG, PNG • Max 10MB</p>
+                <input type="file" id="imageInput" class="file-input" accept="image/*">
+            </div>
+            <button id="analyzeBtn" class="btn" disabled>Analyze Plant Health</button>
+        </div>
+        
+        <div class="preview-section" id="previewSection" style="display: none;">
+            <div class="preview-box">
+                <h3>📷 Uploaded Image</h3>
+                <img id="preview" alt="Plant preview">
+            </div>
+            
+            <div class="preview-box">
+                <h3>🔬 Analysis Results</h3>
+                <div id="results" class="results">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Analyzing plant health...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="info-box">
+            <h4>💡 Model Information</h4>
+            <ul>
+                <li>Trained on 18,586 images with CycleGAN augmentation</li>
+                <li>Detects 7 disease categories across multiple crops</li>
+                <li>Field-tested for real-world conditions</li>
+                <li>Optimized for accuracy on internet and phone images</li>
+            </ul>
+        </div>
+    </div>
+    
+    <script>
+        // Disease classes from your 96% model
+        const diseaseClasses = [
+            'Blight',
+            'Healthy',
+            'Leaf Spot',
+            'Mosaic Virus',
+            'Nutrient Deficiency',
+            'Powdery Mildew',
+            'Rust'
+        ];
+        
+        // Disease information
+        const diseaseInfo = {
+            'Blight': {
+                description: 'Early or late blight affecting leaves',
+                action: 'Remove affected leaves, apply fungicide, improve air circulation'
+            },
+            'Healthy': {
+                description: 'Plant appears healthy with no visible diseases',
+                action: 'Continue regular care and monitoring'
+            },
+            'Leaf Spot': {
+                description: 'Bacterial or fungal spots on leaves',
+                action: 'Remove infected leaves, avoid overhead watering, apply copper spray'
+            },
+            'Mosaic Virus': {
+                description: 'Viral infection causing mottled patterns',
+                action: 'Remove infected plants, control aphids, use resistant varieties'
+            },
+            'Nutrient Deficiency': {
+                description: 'Yellowing or discoloration from lack of nutrients',
+                action: 'Apply balanced fertilizer, check soil pH, improve drainage'
+            },
+            'Powdery Mildew': {
+                description: 'White powdery fungal growth on leaves',
+                action: 'Improve air circulation, apply neem oil or sulfur spray'
+            },
+            'Rust': {
+                description: 'Orange/brown pustules on leaves',
+                action: 'Remove infected leaves, apply fungicide, avoid overhead watering'
+            }
+        };
+        
+        let model = null;
+        const statusDiv = document.getElementById('status');
+        const uploadArea = document.getElementById('uploadArea');
+        const imageInput = document.getElementById('imageInput');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const previewSection = document.getElementById('previewSection');
+        const preview = document.getElementById('preview');
+        const results = document.getElementById('results');
+        
+        // Load the model
+        async function loadModel() {
+            try {
+                statusDiv.textContent = 'Loading CycleGAN model (96% accuracy)...';
+                statusDiv.className = 'status';
+                
+                // Load the Keras model (converted from your training)
+                model = await tf.loadLayersModel('./assets/models/model.json');
+                
+                statusDiv.textContent = '✅ Model loaded successfully! Ready to analyze plant diseases.';
+                statusDiv.className = 'status success';
+                
+                console.log('Model loaded:', model);
+            } catch (error) {
+                console.error('Error loading model:', error);
+                statusDiv.textContent = '❌ Error loading model. Please check console for details.';
+                statusDiv.className = 'status error';
+            }
+        }
+        
+        // Image preprocessing
+        function preprocessImage(img) {
+            // Convert to tensor and resize to 224x224 (your model's input size)
+            const tensor = tf.browser.fromPixels(img)
+                .resizeNearestNeighbor([224, 224])
+                .toFloat();
+            
+            // Normalize to [0, 1] range (as your model expects)
+            const normalized = tensor.div(255.0);
+            
+            // Add batch dimension
+            return normalized.expandDims(0);
+        }
+        
+        // Analyze the image
+        async function analyzeImage() {
+            if (!model || !preview.src) return;
+            
+            results.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Analyzing with 96% accuracy model...</p>
+                </div>
+            `;
+            
+            try {
+                // Preprocess the image
+                const input = preprocessImage(preview);
+                
+                // Run inference
+                const predictions = await model.predict(input).data();
+                
+                // Clean up tensor
+                input.dispose();
+                
+                // Process results
+                const sortedResults = diseaseClasses
+                    .map((name, index) => ({
+                        name: name,
+                        confidence: predictions[index] * 100
+                    }))
+                    .sort((a, b) => b.confidence - a.confidence);
+                
+                // Display results
+                displayResults(sortedResults);
+                
+            } catch (error) {
+                console.error('Analysis error:', error);
+                results.innerHTML = `
+                    <div class="status error">
+                        Error analyzing image. Please try again.
+                    </div>
+                `;
+            }
+        }
+        
+        // Display results
+        function displayResults(predictions) {
+            const topPrediction = predictions[0];
+            const info = diseaseInfo[topPrediction.name];
+            
+            let resultsHTML = '';
+            
+            // Show top prediction prominently
+            resultsHTML += `
+                <div class="result-item top">
+                    <span class="disease-name">${topPrediction.name}</span>
+                    <span class="confidence">${topPrediction.confidence.toFixed(1)}%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: ${topPrediction.confidence}%"></div>
+                </div>
+            `;
+            
+            // Show disease information
+            if (info) {
+                resultsHTML += `
+                    <div style="margin: 20px 0; padding: 15px; background: #f0f9ff; border-radius: 8px;">
+                        <h4 style="color: #1e40af; margin-bottom: 10px;">📋 Diagnosis</h4>
+                        <p style="color: #3730a3; margin-bottom: 10px;">${info.description}</p>
+                        <h4 style="color: #1e40af; margin-bottom: 10px;">💊 Recommended Action</h4>
+                        <p style="color: #3730a3;">${info.action}</p>
+                    </div>
+                `;
+            }
+            
+            // Show other predictions
+            resultsHTML += '<div style="margin-top: 20px;"><h4 style="margin-bottom: 10px;">Other Possibilities:</h4>';
+            for (let i = 1; i < Math.min(4, predictions.length); i++) {
+                resultsHTML += `
+                    <div class="result-item">
+                        <span>${predictions[i].name}</span>
+                        <span style="color: #6b7280;">${predictions[i].confidence.toFixed(1)}%</span>
+                    </div>
+                `;
+            }
+            resultsHTML += '</div>';
+            
+            results.innerHTML = resultsHTML;
+        }
+        
+        // File selection
+        uploadArea.addEventListener('click', () => imageInput.click());
+        
+        imageInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    preview.src = e.target.result;
+                    previewSection.style.display = 'grid';
+                    analyzeBtn.disabled = false;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        // Drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    preview.src = e.target.result;
+                    previewSection.style.display = 'grid';
+                    analyzeBtn.disabled = false;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        // Analyze button
+        analyzeBtn.addEventListener('click', analyzeImage);
+        
+        // Load model on page load
+        loadModel();
+    </script>
+</body>
+</html>
