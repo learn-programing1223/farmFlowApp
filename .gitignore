@@ -5,9 +5,16 @@ __pycache__/
 *.so
 .Python
 venv/
+venv_gpu/
 env/
 ENV/
 .venv
+.env
+**/venv*/
+**/env/
+*.pyc
+*.pyo
+*.pyd
 
 # Data files - EXCLUDE ALL DATA
 data/
