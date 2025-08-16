@@ -166,17 +166,42 @@ class EnhancedDataLoader:
         print(f"Found {len(class_names)} classes: {class_names}")
         
         # Load images from each class
+        total_files_found = 0
         for class_idx, class_name in enumerate(class_names):
             class_dir = dataset_path / class_name
             
-            # Get all image files
-            img_files = list(class_dir.glob('*.jpg'))
-            img_files += list(class_dir.glob('*.jpeg'))
-            img_files += list(class_dir.glob('*.png'))
+            # Get all image files - handle both lowercase and uppercase extensions
+            img_files = []
+            # Common image extensions (both cases)
+            extensions = ['*.jpg', '*.JPG', '*.jpeg', '*.JPEG', '*.png', '*.PNG', '*.bmp', '*.BMP']
+            
+            # Count files per extension for diagnostics
+            ext_counts = {}
+            for ext in extensions:
+                found = list(class_dir.glob(ext))
+                if found:
+                    ext_counts[ext] = len(found)
+                    img_files.extend(found)
+            
+            # Remove duplicates if any (shouldn't be on Windows, but just in case)
+            img_files = list(set(img_files))
+            
+            # Log class loading details
+            if img_files:
+                print(f"  {class_name}: Found {len(img_files)} images", end="")
+                if ext_counts:
+                    print(f" ({', '.join([f'{k[1:]}: {v}' for k, v in ext_counts.items()])})")
+                else:
+                    print()
+                total_files_found += len(img_files)
+            else:
+                print(f"  {class_name}: WARNING - No images found!")
             
             for img_path in img_files:
                 image_paths.append(str(img_path))
                 labels.append(class_idx)
+        
+        print(f"Total files found in {split}: {total_files_found}")
         
         # Store class info
         self.class_names = class_names

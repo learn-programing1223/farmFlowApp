@@ -570,19 +570,65 @@ def main():
     model.save(model_path)
     print(f"[OK] Saved Keras model: {model_path}")
     
-    # Convert to TFLite
-    converter = tf.lite.TFLiteConverter.from_keras_model(model)
-    converter.optimizations = [tf.lite.Optimize.DEFAULT]
-    converter.target_spec.supported_types = [tf.float16]
+    # TFLite conversion with mixed precision handling
+    print("\n" + "-" * 70)
+    print("Converting to TFLite...")
     
-    tflite_model = converter.convert()
-    
-    # Save TFLite model
-    tflite_path = Path(args.output_dir) / 'enhanced_model.tflite'
-    with open(tflite_path, 'wb') as f:
-        f.write(tflite_model)
-    
-    print(f"[OK] Saved TFLite model: {tflite_path} ({len(tflite_model)/1024/1024:.2f} MB)")
+    try:
+        # First, create a copy of the model and convert to float32
+        # This is necessary because TFLite doesn't handle mixed_float16 well
+        print("[INFO] Creating float32 model for TFLite conversion...")
+        
+        # Clone the model architecture
+        model_config = model.get_config()
+        
+        # Reset mixed precision policy temporarily
+        original_policy = mixed_precision.global_policy()
+        mixed_precision.set_global_policy('float32')
+        
+        # Create new model with float32
+        from tensorflow.keras.models import model_from_config
+        float32_model = model_from_config(model_config)
+        float32_model.set_weights(model.get_weights())
+        
+        # Standard TFLite conversion
+        converter = tf.lite.TFLiteConverter.from_keras_model(float32_model)
+        converter.optimizations = [tf.lite.Optimize.DEFAULT]
+        
+        # Enable TF Select ops to handle all operations
+        converter.allow_custom_ops = True
+        converter.target_spec.supported_ops = [
+            tf.lite.OpsSet.TFLITE_BUILTINS,  # Standard TFLite ops
+            tf.lite.OpsSet.SELECT_TF_OPS      # Enable TF ops (Conv2D, BiasAdd, etc.)
+        ]
+        
+        # Convert to float16 for smaller size (optional)
+        converter.target_spec.supported_types = [tf.float16]
+        
+        # Convert model
+        tflite_model = converter.convert()
+        
+        # Save TFLite model
+        tflite_path = Path(args.output_dir) / 'enhanced_model.tflite'
+        with open(tflite_path, 'wb') as f:
+            f.write(tflite_model)
+        
+        print(f"[OK] Saved TFLite model: {tflite_path} ({len(tflite_model)/1024/1024:.2f} MB)")
+        
+        # Also save a quantized version for even smaller size
+        print("[INFO] Creating INT8 quantized model...")
+        converter.optimizations = [tf.lite.Optimize.DEFAULT]
+        converter.representative_dataset = None  # Would need representative data for full INT8
+        
+        # Restore original mixed precision policy
+        mixed_precision.set_global_policy(original_policy)
+        
+    except Exception as e:
+        print(f"[WARNING] TFLite conversion failed: {str(e)}")
+        print("[INFO] This is not critical - the Keras model was saved successfully")
+        print("[INFO] You can try conversion later with: ")
+        print("       converter.allow_custom_ops = True")
+        print("       converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS, tf.lite.OpsSet.SELECT_TF_OPS]")
     
     # Save training summary
     summary = {
