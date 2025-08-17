@@ -59,8 +59,8 @@ def parse_arguments():
                        help='Batch size for training')
     parser.add_argument('--epochs', type=int, default=30,
                        help='Number of training epochs')
-    parser.add_argument('--learning_rate', type=float, default=1e-3,
-                       help='Initial learning rate')
+    parser.add_argument('--learning_rate', type=float, default=5e-3,
+                       help='Initial learning rate (optimized for faster convergence)')
     
     # Loss arguments
     parser.add_argument('--loss_type', type=str, default='combined',
@@ -193,6 +193,52 @@ class SWACallback(keras.callbacks.Callback):
         if self.swa_weights is not None:
             print("\n[SWA] Setting final averaged weights")
             self.model.set_weights(self.swa_weights)
+
+
+class LearningRateTracker(keras.callbacks.Callback):
+    """Track and log learning rate during training."""
+    
+    def on_epoch_end(self, epoch, logs=None):
+        lr = self.model.optimizer.learning_rate
+        if hasattr(lr, 'numpy'):
+            lr = lr.numpy()
+        elif callable(lr):
+            # If it's a schedule, get current value
+            lr = lr(self.model.optimizer.iterations)
+            if hasattr(lr, 'numpy'):
+                lr = lr.numpy()
+        
+        print(f"  [LR: {lr:.2e}]", end="")
+        if logs is not None:
+            logs['lr'] = float(lr)
+
+
+class WarmupCallback(keras.callbacks.Callback):
+    """Warmup learning rate for stable training start."""
+    
+    def __init__(self, warmup_epochs=3, initial_lr=5e-3, verbose=True):
+        super().__init__()
+        self.warmup_epochs = warmup_epochs
+        self.initial_lr = initial_lr
+        self.verbose = verbose
+        self.target_lr = initial_lr
+        
+    def on_train_begin(self, logs=None):
+        # Store the target learning rate
+        self.target_lr = keras.backend.get_value(self.model.optimizer.learning_rate)
+        
+    def on_epoch_begin(self, epoch, logs=None):
+        if epoch < self.warmup_epochs:
+            # Linear warmup
+            warmup_lr = self.target_lr * (epoch + 1) / self.warmup_epochs
+            keras.backend.set_value(self.model.optimizer.learning_rate, warmup_lr)
+            if self.verbose:
+                print(f"\n[Warmup] Setting LR to {warmup_lr:.6f} (epoch {epoch+1}/{self.warmup_epochs})")
+        elif epoch == self.warmup_epochs:
+            # Restore target learning rate
+            keras.backend.set_value(self.model.optimizer.learning_rate, self.target_lr)
+            if self.verbose:
+                print(f"\n[Warmup Complete] LR set to {self.target_lr:.6f}")
 
 
 def create_model(num_classes=6, input_shape=(224, 224, 3), include_mixup=False, mixup_alpha=0.2):
@@ -502,17 +548,57 @@ def main():
     
     print(f"[OK] Model created with {model.count_params():,} parameters")
     
+    # Calculate steps for optimizer and callbacks
+    steps_per_epoch = len(train_paths) // args.batch_size
+    validation_steps = len(val_paths) // args.batch_size
+    
     # Create loss function
     loss_fn = create_loss_function(args, class_weights)
     
-    # Create optimizer with gradient clipping
-    optimizer = keras.optimizers.Adam(learning_rate=args.learning_rate, clipnorm=args.gradient_clip_norm)
+    # Create learning rate schedule for better convergence
+    print("\n" + "-" * 70)
+    print("Setting up optimizer with learning rate scheduling...")
+    
+    # Use exponential decay for smooth learning rate reduction
+    lr_schedule = keras.optimizers.schedules.ExponentialDecay(
+        initial_learning_rate=args.learning_rate,
+        decay_steps=steps_per_epoch,  # Decay each epoch
+        decay_rate=0.96,  # Reduce by 4% each epoch
+        staircase=False  # Smooth decay, not stepped
+    )
+    
+    # Create AdamW optimizer (better than Adam for this task)
+    # AdamW includes weight decay which acts as L2 regularization
+    try:
+        # Try to use AdamW if available (TF 2.13+)
+        optimizer = keras.optimizers.AdamW(
+            learning_rate=lr_schedule,
+            weight_decay=0.0001,  # L2 regularization
+            clipnorm=args.gradient_clip_norm,
+            beta_1=0.9,
+            beta_2=0.999,
+            epsilon=1e-7
+        )
+        optimizer_name = "AdamW"
+    except AttributeError:
+        # Fall back to Adam if AdamW not available
+        optimizer = keras.optimizers.Adam(
+            learning_rate=lr_schedule,
+            clipnorm=args.gradient_clip_norm,
+            beta_1=0.9,
+            beta_2=0.999,
+            epsilon=1e-7
+        )
+        optimizer_name = "Adam"
     
     # Compile model
     print("\n" + "-" * 70)
     print("Compiling model...")
     print(f"  Loss: {args.loss_type}")
-    print(f"  Optimizer: Adam with gradient clipping (norm={args.gradient_clip_norm})")
+    print(f"  Optimizer: {optimizer_name} with exponential LR decay")
+    print(f"  Initial LR: {args.learning_rate:.4f}")
+    print(f"  LR decay rate: 0.96 per epoch")
+    print(f"  Gradient clipping: norm={args.gradient_clip_norm}")
     
     model.compile(
         optimizer=optimizer,
@@ -534,13 +620,21 @@ def main():
         augment=False       # Explicitly no augmentation
     )
     
-    # Calculate steps
-    steps_per_epoch = len(train_paths) // args.batch_size
-    validation_steps = len(val_paths) // args.batch_size
+    # Note: steps_per_epoch and validation_steps already calculated above for optimizer
     clean_metrics_steps = min(100, steps_per_epoch)  # Evaluate on subset for speed
     
     # Setup callbacks
     callbacks = [
+        # Warmup callback for stable training start (first 3 epochs)
+        WarmupCallback(
+            warmup_epochs=3,
+            initial_lr=args.learning_rate,
+            verbose=True
+        ),
+        
+        # Learning rate tracker to monitor LR changes
+        LearningRateTracker(),
+        
         # Clean metrics callback for accurate training metrics
         CleanMetricsCallback(
             clean_dataset=train_dataset_clean,
@@ -557,13 +651,15 @@ def main():
             verbose=1
         ),
         
-        # Reduce learning rate on plateau
+        # Reduce learning rate on plateau (improved settings)
         keras.callbacks.ReduceLROnPlateau(
             monitor='val_loss',
             factor=0.5,
-            patience=3,
+            patience=3,  # Quick adaptation
             min_lr=1e-7,
-            verbose=1
+            verbose=1,
+            cooldown=2,  # Prevent oscillation
+            mode='min'
         ),
         
         # Early stopping - increased patience for better training

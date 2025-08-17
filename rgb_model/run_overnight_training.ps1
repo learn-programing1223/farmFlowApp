@@ -18,12 +18,12 @@ Write-Host "Working directory: $scriptPath" -ForegroundColor Green
 Write-Host ""
 
 # Training configuration
-$epochs = 50
+$epochs = 30  # Reduced from 50 - faster convergence with optimized LR
 $batchSize = 32
 $preprocessingMode = "default"  # Use advanced preprocessing for best results
 $lossType = "combined"  # Focal + Label Smoothing
-$learningRate = 0.001
-$swaStartEpoch = 30  # Start SWA after 30 epochs
+$learningRate = 0.005  # Optimized learning rate (5x faster!)
+$swaStartEpoch = 20  # Start SWA after 20 epochs
 
 Write-Host "Training Configuration:" -ForegroundColor Yellow
 Write-Host "  Epochs: $epochs"

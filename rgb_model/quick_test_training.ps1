@@ -24,8 +24,9 @@ Set-Location $scriptPath
 
 # Quick test configuration
 Write-Host "Test Configuration:" -ForegroundColor Yellow
-Write-Host "  Epochs: 2 (quick test)"
+Write-Host "  Epochs: 3 (quick test)"
 Write-Host "  Batch Size: 32"
+Write-Host "  Learning Rate: 0.005 (optimized)"
 Write-Host "  Preprocessing: legacy (faster for test)"
 Write-Host ""
 
@@ -35,8 +36,9 @@ Write-Host "Starting quick test at $(Get-Date -Format 'HH:mm:ss')..." -Foregroun
 
 python train_robust_model_v2.py `
     --test_run `
-    --epochs 2 `
+    --epochs 3 `
     --batch_size 32 `
+    --learning_rate 0.005 `
     --preprocessing_mode legacy `
     --loss_type standard `
     --swa_start_epoch 100
