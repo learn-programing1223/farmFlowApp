@@ -34,9 +34,9 @@ sys.path.append(str(Path(__file__).parent / 'src'))
 from data_loader_v2 import EnhancedDataLoader
 from losses import FocalLoss, LabelSmoothingCrossEntropy, CombinedLoss, get_loss_by_name
 
-# Enable mixed precision for better performance
-from tensorflow.keras import mixed_precision
-mixed_precision.set_global_policy('mixed_float16')
+# Disable mixed precision for CPU training
+# from tensorflow.keras import mixed_precision
+# mixed_precision.set_global_policy('mixed_float16')
 
 
 def parse_arguments():
@@ -142,8 +142,8 @@ class SWACallback(keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
         if epoch >= self.start_epoch and (epoch - self.start_epoch) % self.update_freq == 0:
             if self.swa_weights is None:
-                # Initialize SWA weights
-                self.swa_weights = [w.numpy().copy() for w in self.model.get_weights()]
+                # Initialize SWA weights - get_weights() already returns numpy arrays
+                self.swa_weights = [w.copy() for w in self.model.get_weights()]
             else:
                 # Update SWA weights (running average)
                 current_weights = self.model.get_weights()
@@ -491,9 +491,9 @@ def main():
     
     # Setup callbacks
     callbacks = [
-        # Model checkpoint
+        # Model checkpoint - use .keras format to avoid warning
         keras.callbacks.ModelCheckpoint(
-            Path(args.output_dir) / 'enhanced_best.h5',
+            Path(args.output_dir) / 'enhanced_best.keras',
             monitor='val_accuracy',
             save_best_only=True,
             mode='max',
@@ -509,10 +509,10 @@ def main():
             verbose=1
         ),
         
-        # Early stopping
+        # Early stopping - increased patience for better training
         keras.callbacks.EarlyStopping(
             monitor='val_accuracy',
-            patience=7,
+            patience=15,  # Increased from 7 to 15
             restore_best_weights=True,
             verbose=1
         ),
@@ -543,7 +543,7 @@ def main():
         validation_data=val_dataset,
         validation_steps=validation_steps,
         callbacks=callbacks,
-        verbose=1
+        verbose=2  # Changed from 1 to 2 - only show epoch progress, not individual steps
     )
     
     # Evaluate on test set
@@ -640,7 +640,7 @@ def main():
             'recall': float(test_results[3]),
             'auc': float(test_results[4])
         },
-        'class_weights': class_weights,
+        'class_weights': {int(k): float(v) for k, v in class_weights.items()},  # Convert int64 to int
         'training_history': history.history
     }
     

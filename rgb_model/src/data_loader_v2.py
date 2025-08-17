@@ -183,7 +183,28 @@ class EnhancedDataLoader:
                     ext_counts[ext] = len(found)
                     img_files.extend(found)
             
-            # Remove duplicates if any (shouldn't be on Windows, but just in case)
+            # IMPORTANT: Also use rglob to find files in subdirectories
+            # This handles cases where images might be nested
+            if not img_files:
+                # Try case-insensitive search on Unix-like systems
+                import platform
+                if platform.system() != 'Windows':
+                    # On Linux/WSL, also search with case-insensitive pattern
+                    for pattern in ['*.jpg', '*.jpeg', '*.png', '*.bmp']:
+                        # Use both lowercase and uppercase
+                        for case_pattern in [pattern, pattern.upper(), pattern.capitalize()]:
+                            found = list(class_dir.glob(case_pattern))
+                            if found and found not in img_files:
+                                img_files.extend(found)
+                    
+                    # Also try recursive search in case files are nested
+                    if not img_files:
+                        for pattern in ['**/*.jpg', '**/*.JPG', '**/*.jpeg', '**/*.JPEG', '**/*.png', '**/*.PNG']:
+                            found = list(class_dir.glob(pattern))
+                            if found:
+                                img_files.extend(found)
+            
+            # Remove duplicates if any
             img_files = list(set(img_files))
             
             # Log class loading details
@@ -353,6 +374,9 @@ class EnhancedDataLoader:
         
         # Batch and prefetch
         dataset = dataset.batch(self.batch_size)
+        # Add repeat to ensure dataset doesn't run out during training
+        if is_training:
+            dataset = dataset.repeat()
         dataset = dataset.prefetch(tf.data.AUTOTUNE)
         
         return dataset
