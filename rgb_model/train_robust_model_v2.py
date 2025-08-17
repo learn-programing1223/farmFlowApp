@@ -129,6 +129,42 @@ class MixUpAugmentation(keras.layers.Layer):
         return tf.cond(apply_mixup, mixup, lambda: (images, labels))
 
 
+class CleanMetricsCallback(keras.callbacks.Callback):
+    """Calculate metrics on clean (non-augmented) data for accurate training metrics."""
+    
+    def __init__(self, clean_dataset, steps, frequency=5):
+        super().__init__()
+        self.clean_dataset = clean_dataset
+        self.steps = steps
+        self.frequency = frequency  # Calculate every N epochs
+    
+    def on_epoch_end(self, epoch, logs=None):
+        """Calculate and report clean metrics."""
+        # Only calculate every N epochs to save time
+        if (epoch + 1) % self.frequency != 0:
+            return
+            
+        # Evaluate on clean data
+        print("\n  Calculating clean metrics...", end="")
+        results = self.model.evaluate(self.clean_dataset, steps=self.steps, verbose=0)
+        
+        # Update logs with clean metrics
+        if logs is not None:
+            # Find accuracy metric index
+            metric_names = self.model.metrics_names
+            for i, name in enumerate(metric_names):
+                if 'accuracy' in name:
+                    clean_acc = results[i]
+                    logs['clean_train_acc'] = clean_acc
+                    
+                    # Report the difference
+                    if 'accuracy' in logs:
+                        augmented_acc = logs['accuracy']
+                        gap = augmented_acc - clean_acc
+                        print(f" Clean: {clean_acc:.4f}, Augmented: {augmented_acc:.4f}, Gap: {gap:+.4f}")
+                    break
+
+
 class SWACallback(keras.callbacks.Callback):
     """Stochastic Weight Averaging callback."""
     
@@ -412,7 +448,7 @@ def main():
         target_size=(224, 224),
         batch_size=args.batch_size,
         use_advanced_preprocessing=args.use_advanced_preprocessing,
-        preprocessing_mode='minimal'  # Faster for validation
+        preprocessing_mode=args.preprocessing_mode  # Use same mode as training for consistency
     )
     
     # Load datasets
@@ -489,8 +525,29 @@ def main():
         ]
     )
     
+    # Create clean training dataset for accurate metrics (NO augmentation)
+    print("\nCreating clean training dataset for metrics calculation...")
+    train_dataset_clean = train_loader.create_tf_dataset(
+        train_paths, train_labels,
+        is_training=False,  # This prevents augmentation
+        shuffle=False,      # No need to shuffle for metrics
+        augment=False       # Explicitly no augmentation
+    )
+    
+    # Calculate steps
+    steps_per_epoch = len(train_paths) // args.batch_size
+    validation_steps = len(val_paths) // args.batch_size
+    clean_metrics_steps = min(100, steps_per_epoch)  # Evaluate on subset for speed
+    
     # Setup callbacks
     callbacks = [
+        # Clean metrics callback for accurate training metrics
+        CleanMetricsCallback(
+            clean_dataset=train_dataset_clean,
+            steps=clean_metrics_steps,
+            frequency=5  # Calculate every 5 epochs
+        ),
+        
         # Model checkpoint - use .keras format to avoid warning
         keras.callbacks.ModelCheckpoint(
             Path(args.output_dir) / 'enhanced_best.keras',
@@ -532,10 +589,6 @@ def main():
     print("STARTING TRAINING...")
     print("=" * 70)
     
-    # Calculate steps
-    steps_per_epoch = len(train_paths) // args.batch_size
-    validation_steps = len(val_paths) // args.batch_size
-    
     history = model.fit(
         train_dataset,
         epochs=args.epochs,
@@ -575,24 +628,8 @@ def main():
     print("Converting to TFLite...")
     
     try:
-        # First, create a copy of the model and convert to float32
-        # This is necessary because TFLite doesn't handle mixed_float16 well
-        print("[INFO] Creating float32 model for TFLite conversion...")
-        
-        # Clone the model architecture
-        model_config = model.get_config()
-        
-        # Reset mixed precision policy temporarily
-        original_policy = mixed_precision.global_policy()
-        mixed_precision.set_global_policy('float32')
-        
-        # Create new model with float32
-        from tensorflow.keras.models import model_from_config
-        float32_model = model_from_config(model_config)
-        float32_model.set_weights(model.get_weights())
-        
         # Standard TFLite conversion
-        converter = tf.lite.TFLiteConverter.from_keras_model(float32_model)
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
         
         # Enable TF Select ops to handle all operations
@@ -619,9 +656,6 @@ def main():
         print("[INFO] Creating INT8 quantized model...")
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
         converter.representative_dataset = None  # Would need representative data for full INT8
-        
-        # Restore original mixed precision policy
-        mixed_precision.set_global_policy(original_policy)
         
     except Exception as e:
         print(f"[WARNING] TFLite conversion failed: {str(e)}")
