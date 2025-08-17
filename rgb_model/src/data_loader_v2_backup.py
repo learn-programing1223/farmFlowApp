@@ -140,11 +140,11 @@ class EnhancedDataLoader:
         split: str = 'train'
     ) -> Tuple[List[str], List[int], List[str]]:
         """
-        Load dataset from directory structure - FIXED VERSION.
+        Load dataset from directory structure.
         
         Args:
             dataset_path: Path to dataset directory
-            split: Dataset split name
+            split: Dataset split ('train', 'val', 'test')
             
         Returns:
             Tuple of (image_paths, labels, class_names)
@@ -154,82 +154,97 @@ class EnhancedDataLoader:
         if not dataset_path.exists():
             raise ValueError(f"Dataset path does not exist: {dataset_path}")
         
-        # First, identify valid classes (those with images)
-        valid_class_info = {}
-        potential_dirs = sorted([d for d in dataset_path.iterdir() if d.is_dir()])
-        
-        print(f"\nLoading {split} data from {dataset_path}")
-        print(f"Scanning {len(potential_dirs)} directories...")
-        
-        # Check each potential class directory
-        for class_dir in potential_dirs:
-            class_name = class_dir.name
-            
-            # Get unique image files (handle case-insensitive duplicates)
-            img_extensions = ['*.jpg', '*.JPG', '*.jpeg', '*.JPEG', '*.png', '*.PNG', '*.bmp', '*.BMP']
-            unique_files = set()
-            ext_counts = {}
-            
-            for ext in img_extensions:
-                found_files = list(class_dir.glob(ext))
-                for f in found_files:
-                    unique_files.add(f)
-                if found_files:
-                    ext_counts[ext[1:]] = len(found_files)
-            
-            # Only include classes with at least 1 image
-            if unique_files:
-                valid_class_info[class_name] = {
-                    'files': sorted(list(unique_files)),
-                    'ext_counts': ext_counts
-                }
-        
-        # Extract valid class names (excluding empty ones like Rust)
-        class_names = sorted(valid_class_info.keys())
-        
-        if not class_names:
-            raise ValueError(f"No valid classes with images found in {dataset_path}")
-        
-        print(f"Found {len(class_names)} valid classes: {class_names}")
-        
-        # Build the dataset with only valid classes
         image_paths = []
         labels = []
-        total_files = 0
+        class_names = []
         
-        for class_idx, class_name in enumerate(class_names):
-            info = valid_class_info[class_name]
-            img_files = info['files']
-            ext_counts = info['ext_counts']
+        # Get class directories and validate them
+        class_dirs = [d for d in dataset_path.iterdir() if d.is_dir()]
+        # We'll filter out empty classes after checking for images
+        potential_class_names = sorted([d.name for d in class_dirs])
+        
+        print(f"\nLoading {split} data from {dataset_path}")
+        print(f"Checking {len(potential_class_names)} directories: {potential_class_names}")
+        
+        # First pass: check which classes have images
+        valid_classes = []
+        class_file_info = {}
+        
+        for class_name in potential_class_names:
+            class_dir = dataset_path / class_name
             
-            # Report accurate counts
-            print(f"  {class_name}: {len(img_files)} unique images", end="")
-            if ext_counts:
-                ext_str = ', '.join([f'{k}: {v}' for k, v in ext_counts.items()])
-                print(f" ({ext_str})")
+            # Get all image files - handle both lowercase and uppercase extensions
+            img_files = []
+            # Common image extensions (both cases)
+            extensions = ['*.jpg', '*.JPG', '*.jpeg', '*.JPEG', '*.png', '*.PNG', '*.bmp', '*.BMP']
+            
+            # Count files per extension for diagnostics
+            ext_counts = {}
+            for ext in extensions:
+                found = list(class_dir.glob(ext))
+                if found:
+                    ext_counts[ext] = len(found)
+                    img_files.extend(found)
+            
+            # IMPORTANT: Also use rglob to find files in subdirectories
+            # This handles cases where images might be nested
+            if not img_files:
+                # Try case-insensitive search on Unix-like systems
+                import platform
+                if platform.system() != 'Windows':
+                    # On Linux/WSL, also search with case-insensitive pattern
+                    for pattern in ['*.jpg', '*.jpeg', '*.png', '*.bmp']:
+                        # Use both lowercase and uppercase
+                        for case_pattern in [pattern, pattern.upper(), pattern.capitalize()]:
+                            found = list(class_dir.glob(case_pattern))
+                            if found and found not in img_files:
+                                img_files.extend(found)
+                    
+                    # Also try recursive search in case files are nested
+                    if not img_files:
+                        for pattern in ['**/*.jpg', '**/*.JPG', '**/*.jpeg', '**/*.JPEG', '**/*.png', '**/*.PNG']:
+                            found = list(class_dir.glob(pattern))
+                            if found:
+                                img_files.extend(found)
+            
+            # Remove duplicates (important for case-insensitive filesystems)
+            # Convert to set and back to list to remove duplicates
+            unique_files = set()
+            for f in img_files:
+                # On Windows, paths might be duplicated with different cases
+                unique_files.add(f)
+            img_files = list(unique_files)
+            
+            # Log class loading details
+            if img_files:
+                print(f"  {class_name}: Found {len(img_files)} images", end="")
+                if ext_counts:
+                    print(f" ({', '.join([f'{k[1:]}: {v}' for k, v in ext_counts.items()])})")
+                else:
+                    print()
+                total_files_found += len(img_files)
             else:
-                print()
+                print(f"  {class_name}: WARNING - No images found!")
             
-            # Add to dataset
             for img_path in img_files:
                 image_paths.append(str(img_path))
                 labels.append(class_idx)
-            
-            total_files += len(img_files)
         
-        print(f"Total unique files in {split}: {total_files}")
+        print(f"Total files found in {split}: {total_files_found}")
         
         # Store class info
         self.class_names = class_names
         self.num_classes = len(class_names)
         
-        # Print final distribution
         print(f"Loaded {len(image_paths)} images")
-        unique_labels, counts = np.unique(labels, return_counts=True)
-        for idx, count in zip(unique_labels, counts):
+        
+        # Print class distribution
+        unique, counts = np.unique(labels, return_counts=True)
+        for idx, count in zip(unique, counts):
             print(f"  {class_names[idx]}: {count} images")
         
         return image_paths, labels, class_names
+    
     def preprocess_image(
         self,
         image_path: Union[str, Path],
