@@ -23,7 +23,9 @@ $batchSize = 32
 $preprocessingMode = "default"  # Use advanced preprocessing for best results
 $lossType = "combined"  # Focal + Label Smoothing
 $learningRate = 0.005  # Optimized learning rate (5x faster!)
-$swaStartEpoch = 20  # Start SWA after 20 epochs
+$swaStartRatio = 0.75  # Start SWA at 75% of training (epoch 23 for 30 epochs)
+$mixupAlpha = 0.1  # Reduced for better disease pattern preservation
+$mixupProbability = 0.3  # Apply to only 30% of batches
 
 Write-Host "Training Configuration:" -ForegroundColor Yellow
 Write-Host "  Epochs: $epochs"
@@ -31,7 +33,8 @@ Write-Host "  Batch Size: $batchSize"
 Write-Host "  Preprocessing: $preprocessingMode (advanced)"
 Write-Host "  Loss Function: $lossType"
 Write-Host "  Learning Rate: $learningRate"
-Write-Host "  SWA Start: Epoch $swaStartEpoch"
+Write-Host "  SWA Start: $([int]($epochs * $swaStartRatio)) (75% of training)"
+Write-Host "  MixUp: alpha=$mixupAlpha, prob=$mixupProbability"
 Write-Host ""
 
 # Create output directory for this run
@@ -51,9 +54,9 @@ $pythonCmd = @(
     "--use_advanced_preprocessing",
     "--loss_type", $lossType,
     "--learning_rate", $learningRate,
-    "--swa_start_epoch", $swaStartEpoch,
-    "--mixup_alpha", "0.2",
-    "--mixup_probability", "0.5",
+    "--swa_start_ratio", $swaStartRatio,
+    "--mixup_alpha", $mixupAlpha,
+    "--mixup_probability", $mixupProbability,
     "--gradient_clip_norm", "1.0",
     "--focal_gamma", "2.0",
     "--label_smoothing_epsilon", "0.1",

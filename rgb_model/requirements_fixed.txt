@@ -1,0 +1,41 @@
+# Fixed Requirements for Plant Disease Detection Training
+# Compatible with Python 3.9 - 3.11 (NOT 3.13)
+# Last Updated: 2024
+
+# Core Deep Learning
+tensorflow==2.15.0
+keras==2.15.0
+
+# Image Processing & Augmentation
+opencv-python==4.8.1.78
+albumentations==1.3.1
+scikit-image==0.21.0
+Pillow==10.1.0
+
+# Numerical & Data
+numpy==1.24.3
+pandas==2.0.3
+scipy==1.11.4
+
+# Visualization
+matplotlib==3.7.2
+seaborn==0.12.2
+
+# Progress & Utilities
+tqdm==4.66.1
+colorama==0.4.6
+
+# Protobuf fix (addresses version mismatch)
+protobuf==4.25.1
+
+# Additional for model conversion
+tensorflow-lite==2.15.0
+tensorflowjs==4.15.0
+
+# Optional GPU support (CUDA 11.8)
+# tensorflow-gpu==2.15.0
+
+# Development tools
+ipykernel==6.26.0
+jupyter==1.0.0
+notebook==7.0.6

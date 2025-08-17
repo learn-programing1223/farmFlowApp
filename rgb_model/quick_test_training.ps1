@@ -41,7 +41,9 @@ python train_robust_model_v2.py `
     --learning_rate 0.005 `
     --preprocessing_mode legacy `
     --loss_type standard `
-    --swa_start_epoch 100
+    --mixup_alpha 0.1 `
+    --mixup_probability 0.3 `
+    --swa_start_ratio 0.75
 
 $duration = (Get-Date) - $startTime
 

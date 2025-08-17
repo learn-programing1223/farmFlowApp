@@ -49,7 +49,7 @@ def parse_arguments():
     parser.add_argument('--preprocessing_mode', type=str, default='default',
                        choices=['default', 'fast', 'minimal', 'legacy'],
                        help='Preprocessing mode to use')
-    parser.add_argument('--use_advanced_preprocessing', type=bool, default=True,
+    parser.add_argument('--use_advanced_preprocessing', action='store_true', default=True,
                        help='Use advanced preprocessing (CLAHE, etc.)')
     parser.add_argument('--comparison_mode', action='store_true',
                        help='Compare preprocessing modes')
@@ -75,13 +75,15 @@ def parse_arguments():
     
     # Training arguments
     parser.add_argument('--swa_start_epoch', type=int, default=20,
-                       help='Epoch to start Stochastic Weight Averaging')
+                       help='Epoch to start Stochastic Weight Averaging (deprecated, use swa_start_ratio)')
+    parser.add_argument('--swa_start_ratio', type=float, default=0.75,
+                       help='Start SWA at this ratio of total epochs (0.75 = 75% through training)')
     parser.add_argument('--gradient_clip_norm', type=float, default=1.0,
                        help='Max norm for gradient clipping')
-    parser.add_argument('--mixup_alpha', type=float, default=0.2,
-                       help='MixUp alpha parameter (0 to disable)')
-    parser.add_argument('--mixup_probability', type=float, default=0.5,
-                       help='Probability of applying MixUp')
+    parser.add_argument('--mixup_alpha', type=float, default=0.1,
+                       help='MixUp alpha parameter (0 to disable, 0.1 recommended for plant diseases)')
+    parser.add_argument('--mixup_probability', type=float, default=0.3,
+                       help='Probability of applying MixUp (0.3 = 30% of batches)')
     
     # Other arguments
     parser.add_argument('--test_run', action='store_true',
@@ -166,28 +168,44 @@ class CleanMetricsCallback(keras.callbacks.Callback):
 
 
 class SWACallback(keras.callbacks.Callback):
-    """Stochastic Weight Averaging callback."""
+    """Stochastic Weight Averaging callback with dynamic start epoch."""
     
-    def __init__(self, start_epoch=20, update_freq=1):
+    def __init__(self, start_epoch=None, start_ratio=0.75, update_freq=1):
         super().__init__()
-        self.start_epoch = start_epoch
+        self.start_epoch = start_epoch  # Can be set explicitly
+        self.start_ratio = start_ratio  # Or use ratio of total epochs
         self.update_freq = update_freq
         self.swa_weights = None
         self.n_models = 0
+        self.swa_start_epoch = None
+    
+    def on_train_begin(self, logs=None):
+        """Calculate SWA start epoch based on total epochs."""
+        if self.start_epoch is not None:
+            # Use explicit start epoch if provided
+            self.swa_start_epoch = self.start_epoch
+        else:
+            # Calculate based on ratio
+            total_epochs = self.params.get('epochs', 50)
+            self.swa_start_epoch = int(total_epochs * self.start_ratio)
+        
+        print(f"\n[SWA] Will start at epoch {self.swa_start_epoch} ({self.start_ratio*100:.0f}% through training)")
     
     def on_epoch_end(self, epoch, logs=None):
-        if epoch >= self.start_epoch and (epoch - self.start_epoch) % self.update_freq == 0:
-            if self.swa_weights is None:
-                # Initialize SWA weights - get_weights() already returns numpy arrays
-                self.swa_weights = [w.copy() for w in self.model.get_weights()]
-            else:
-                # Update SWA weights (running average)
-                current_weights = self.model.get_weights()
-                for i in range(len(self.swa_weights)):
-                    self.swa_weights[i] = (self.swa_weights[i] * self.n_models + current_weights[i]) / (self.n_models + 1)
-            
-            self.n_models += 1
-            print(f"\n[SWA] Updated weights (n_models={self.n_models})")
+        if self.swa_start_epoch and epoch >= self.swa_start_epoch:
+            if (epoch - self.swa_start_epoch) % self.update_freq == 0:
+                if self.swa_weights is None:
+                    # Initialize SWA weights
+                    self.swa_weights = [w.copy() for w in self.model.get_weights()]
+                    print(f"\n[SWA] Initialized weight averaging at epoch {epoch+1}")
+                else:
+                    # Update SWA weights (running average)
+                    current_weights = self.model.get_weights()
+                    for i in range(len(self.swa_weights)):
+                        self.swa_weights[i] = (self.swa_weights[i] * self.n_models + current_weights[i]) / (self.n_models + 1)
+                
+                self.n_models += 1
+                print(f"  [SWA] Updated weights (n_models={self.n_models})")
     
     def on_train_end(self, logs=None):
         if self.swa_weights is not None:
@@ -213,32 +231,84 @@ class LearningRateTracker(keras.callbacks.Callback):
             logs['lr'] = float(lr)
 
 
-class WarmupCallback(keras.callbacks.Callback):
-    """Warmup learning rate for stable training start."""
+class WarmupExponentialDecay(keras.optimizers.schedules.LearningRateSchedule):
+    """Combined warmup + exponential decay learning rate schedule."""
     
-    def __init__(self, warmup_epochs=3, initial_lr=5e-3, verbose=True):
+    def __init__(self, initial_lr=5e-3, warmup_epochs=3, decay_rate=0.96, 
+                 decay_steps=100, warmup_steps=None):
         super().__init__()
+        self.initial_lr = tf.cast(initial_lr, tf.float32)
         self.warmup_epochs = warmup_epochs
-        self.initial_lr = initial_lr
-        self.verbose = verbose
-        self.target_lr = initial_lr
+        self.warmup_steps = warmup_steps or (warmup_epochs * decay_steps)
+        self.decay_rate = decay_rate
+        self.decay_steps = tf.cast(decay_steps, tf.float32)
+        
+    def __call__(self, step):
+        # Convert to float for calculations
+        step = tf.cast(step, tf.float32)
+        warmup_steps = tf.cast(self.warmup_steps, tf.float32)
+        
+        # Warmup phase: linear increase from 0 to initial_lr
+        warmup_lr = self.initial_lr * (step / warmup_steps)
+        
+        # Decay phase: exponential decay after warmup
+        decay_lr = self.initial_lr * tf.pow(
+            self.decay_rate, 
+            (step - warmup_steps) / self.decay_steps
+        )
+        
+        # Choose based on step
+        return tf.where(step < warmup_steps, warmup_lr, decay_lr)
+    
+    def get_config(self):
+        return {
+            'initial_lr': float(self.initial_lr.numpy()) if hasattr(self.initial_lr, 'numpy') else float(self.initial_lr),
+            'warmup_epochs': self.warmup_epochs,
+            'decay_rate': self.decay_rate,
+            'decay_steps': float(self.decay_steps.numpy()) if hasattr(self.decay_steps, 'numpy') else float(self.decay_steps),
+            'warmup_steps': self.warmup_steps
+        }
+
+
+# Keep the old WarmupCallback commented out for reference
+# class WarmupCallback(keras.callbacks.Callback):
+#     """DEPRECATED - Now using WarmupExponentialDecay schedule instead."""
+#     pass
+
+
+class SWACyclicLR(keras.callbacks.Callback):
+    """Cyclic learning rate for SWA phase to explore weight space better."""
+    
+    def __init__(self, swa_start_ratio=0.75, base_lr=0.0005, max_lr=0.002, cycle_length=5):
+        super().__init__()
+        self.swa_start_ratio = swa_start_ratio
+        self.base_lr = base_lr
+        self.max_lr = max_lr
+        self.cycle_length = cycle_length
+        self.swa_start_epoch = None
         
     def on_train_begin(self, logs=None):
-        # Store the target learning rate
-        self.target_lr = keras.backend.get_value(self.model.optimizer.learning_rate)
+        """Calculate when to start cyclic LR based on total epochs."""
+        total_epochs = self.params.get('epochs', 50)
+        self.swa_start_epoch = int(total_epochs * self.swa_start_ratio)
         
     def on_epoch_begin(self, epoch, logs=None):
-        if epoch < self.warmup_epochs:
-            # Linear warmup
-            warmup_lr = self.target_lr * (epoch + 1) / self.warmup_epochs
-            keras.backend.set_value(self.model.optimizer.learning_rate, warmup_lr)
-            if self.verbose:
-                print(f"\n[Warmup] Setting LR to {warmup_lr:.6f} (epoch {epoch+1}/{self.warmup_epochs})")
-        elif epoch == self.warmup_epochs:
-            # Restore target learning rate
-            keras.backend.set_value(self.model.optimizer.learning_rate, self.target_lr)
-            if self.verbose:
-                print(f"\n[Warmup Complete] LR set to {self.target_lr:.6f}")
+        """Apply cyclic LR during SWA phase."""
+        if self.swa_start_epoch and epoch >= self.swa_start_epoch:
+            # Calculate position in cycle
+            cycle_position = (epoch - self.swa_start_epoch) % self.cycle_length
+            
+            if cycle_position < self.cycle_length // 2:
+                # Increase LR (first half of cycle)
+                lr_ratio = cycle_position / (self.cycle_length // 2)
+                lr = self.base_lr + (self.max_lr - self.base_lr) * lr_ratio
+            else:
+                # Decrease LR (second half of cycle)
+                lr_ratio = (cycle_position - self.cycle_length // 2) / (self.cycle_length - self.cycle_length // 2)
+                lr = self.max_lr - (self.max_lr - self.base_lr) * lr_ratio
+            
+            keras.backend.set_value(self.model.optimizer.learning_rate, lr)
+            print(f"  [SWA Cyclic] LR set to {lr:.6f} (cycle pos {cycle_position+1}/{self.cycle_length})")
 
 
 def create_model(num_classes=6, input_shape=(224, 224, 3), include_mixup=False, mixup_alpha=0.2):
@@ -555,24 +625,16 @@ def main():
     # Create loss function
     loss_fn = create_loss_function(args, class_weights)
     
-    # Create learning rate schedule for better convergence
+    # Create optimizer with simple float learning rate
     print("\n" + "-" * 70)
-    print("Setting up optimizer with learning rate scheduling...")
+    print("Setting up optimizer...")
     
-    # Use exponential decay for smooth learning rate reduction
-    lr_schedule = keras.optimizers.schedules.ExponentialDecay(
-        initial_learning_rate=args.learning_rate,
-        decay_steps=steps_per_epoch,  # Decay each epoch
-        decay_rate=0.96,  # Reduce by 4% each epoch
-        staircase=False  # Smooth decay, not stepped
-    )
-    
-    # Create AdamW optimizer (better than Adam for this task)
-    # AdamW includes weight decay which acts as L2 regularization
+    # Use simple float learning rate that callbacks can modify
+    # This avoids conflicts with ReduceLROnPlateau and other callbacks
     try:
-        # Try to use AdamW if available (TF 2.13+)
+        # Try AdamW first (better for this task)
         optimizer = keras.optimizers.AdamW(
-            learning_rate=lr_schedule,
+            learning_rate=args.learning_rate,  # Simple float, not schedule
             weight_decay=0.0001,  # L2 regularization
             clipnorm=args.gradient_clip_norm,
             beta_1=0.9,
@@ -583,7 +645,7 @@ def main():
     except AttributeError:
         # Fall back to Adam if AdamW not available
         optimizer = keras.optimizers.Adam(
-            learning_rate=lr_schedule,
+            learning_rate=args.learning_rate,  # Simple float
             clipnorm=args.gradient_clip_norm,
             beta_1=0.9,
             beta_2=0.999,
@@ -595,9 +657,9 @@ def main():
     print("\n" + "-" * 70)
     print("Compiling model...")
     print(f"  Loss: {args.loss_type}")
-    print(f"  Optimizer: {optimizer_name} with exponential LR decay")
+    print(f"  Optimizer: {optimizer_name}")
     print(f"  Initial LR: {args.learning_rate:.4f}")
-    print(f"  LR decay rate: 0.96 per epoch")
+    print(f"  ReduceLROnPlateau will handle LR reduction")
     print(f"  Gradient clipping: norm={args.gradient_clip_norm}")
     
     model.compile(
@@ -625,14 +687,10 @@ def main():
     
     # Setup callbacks
     callbacks = [
-        # Warmup callback for stable training start (first 3 epochs)
-        WarmupCallback(
-            warmup_epochs=3,
-            initial_lr=args.learning_rate,
-            verbose=True
-        ),
+        # NOTE: Warmup is now handled by WarmupExponentialDecay schedule
+        # No need for separate WarmupCallback
         
-        # Learning rate tracker to monitor LR changes
+        # Learning rate tracker to monitor LR changes (including warmup)
         LearningRateTracker(),
         
         # Clean metrics callback for accurate training metrics
@@ -670,8 +728,14 @@ def main():
             verbose=1
         ),
         
-        # Stochastic Weight Averaging
-        SWACallback(start_epoch=args.swa_start_epoch),
+        # Stochastic Weight Averaging (starts at 75% of training)
+        SWACallback(
+            start_epoch=args.swa_start_epoch if args.swa_start_epoch != 20 else None,  # Use explicit if changed
+            start_ratio=args.swa_start_ratio,  # Default 0.75 (75% through training)
+            update_freq=1
+        ),
+        
+        # Note: SWACyclicLR removed - using simple float LR with ReduceLROnPlateau instead
         
         # TensorBoard
         keras.callbacks.TensorBoard(
